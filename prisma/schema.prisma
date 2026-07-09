@@ -1,0 +1,646 @@
+// ============================================================
+// Prisma Schema — نظام إدارة المحل (زيوت / غسيل / إكسسوارات)
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/client"
+  binaryTargets = ["native", "windows", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// المصادقة والمستخدمون
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  password      String
+  name          String    // Arabic display name
+  role          String    @default("cashier") // admin | manager | cashier
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  loginAttempts Int       @default(0)
+  lockedUntil   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  purchaseInvoices   PurchaseInvoice[]
+  saleInvoices       SaleInvoice[]
+  washOrders         WashOrder[]
+  inventoryCounts    InventoryCount[]
+  stockAdjustments   StockAdjustment[]
+  cashTransactions   CashTransaction[]
+  auditLogs          AuditLog[]
+  permissions        Permission[]
+  inventoryTransfers InventoryTransfer[]
+
+  @@map("users")
+}
+
+// Fine-grained per-user permissions per screen/operation
+model Permission {
+  id        String  @id @default(cuid())
+  userId    String
+  screen    String  // e.g. "sales", "purchases", "wash", "oil", "reports", "settings"
+  canView   Boolean @default(true)
+  canCreate Boolean @default(false)
+  canEdit   Boolean @default(false)
+  canDelete Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, screen])
+  @@map("permissions")
+}
+
+// Audit log for every sensitive operation
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // CREATE | UPDATE | DELETE | LOGIN | LOGOUT | LOGIN_FAILED | SETTINGS_CHANGE
+  entity    String   // e.g. "SaleInvoice", "Customer", "User", "Settings"
+  entityId  String?
+  details   String?  // JSON string of changed fields
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ============================================================
+// الإعدادات
+// ============================================================
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  type      String   @default("string") // string | number | boolean | json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ============================================================
+// العملاء
+// ============================================================
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  carNumber String?  // رقم لوحة السيارة
+  notes     String?
+  balance   Float    @default(0) // موجب = العميل مدين، سالب = نحن مدينون
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  saleInvoices     SaleInvoice[]
+  washOrders       WashOrder[]
+  cashTransactions CashTransaction[]
+  odometerReadings OdometerReading[]
+
+  @@map("customers")
+}
+
+// سجل قراءات العداد مرتبطة بكل زيارة
+model OdometerReading {
+  id         String   @id @default(cuid())
+  customerId String
+  reading    Float    // القراءة بالكيلومترات
+  date       DateTime @default(now())
+  invoiceId  String?  // مرجع الفاتورة إن وجدت
+  notes      String?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("odometer_readings")
+}
+
+// ============================================================
+// الموردون
+// ============================================================
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  companyName String?  // اسم الشركة
+  phone       String?
+  email       String?
+  address     String?
+  notes       String?
+  balance     Float    @default(0) // موجب = نحن مدينون، سالب = المورد مدين
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  purchaseInvoices PurchaseInvoice[]
+  cashTransactions CashTransaction[]
+  ledgerEntries    SupplierLedger[]
+
+  @@map("suppliers")
+}
+
+// دفتر حسابات المورد
+model SupplierLedger {
+  id          String   @id @default(cuid())
+  supplierId  String
+  type        String   // debit (مدين) | credit (دائن)
+  amount      Float
+  balance     Float    // الرصيد التراكمي بعد هذه الحركة
+  description String
+  referenceId String?  // معرف الفاتورة أو الدفعة
+  date        DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@map("supplier_ledger")
+}
+
+// ============================================================
+// التصنيفات والمنتجات
+// ============================================================
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   // Arabic name
+  description String?
+  parentId    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  name          String
+  barcode       String?  @unique
+  categoryId    String?
+  purchasePrice Float    @default(0)
+  sellingPrice  Float    @default(0)
+  quantity      Float    @default(0)
+  minQuantity   Float    @default(0)
+  location      String?
+  notes         String?
+  image         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category            Category?              @relation(fields: [categoryId], references: [id])
+  purchaseItems       PurchaseItem[]
+  saleItems           SaleItem[]
+  oilProduct          OilProduct?
+  inventoryMovements  InventoryMovement[]
+  inventoryCountItems InventoryCountItem[]
+  stockAdjustments    StockAdjustment[]
+  transferItems       InventoryTransferItem[]
+
+  @@map("products")
+}
+
+// ============================================================
+// الإكسسوارات
+// ============================================================
+
+model Accessory {
+  id          String   @id @default(cuid())
+  name        String
+  barcode     String?  @unique
+  price       Float    @default(0)
+  quantity    Float    @default(0)
+  minQuantity Float    @default(5)
+  imageUrl    String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  saleItems AccessorySaleItem[]
+
+  @@map("accessories")
+}
+
+// بنود الإكسسوارات في فواتير البيع
+model AccessorySaleItem {
+  id          String @id @default(cuid())
+  invoiceId   String
+  accessoryId String
+  quantity    Float
+  unitPrice   Float
+  discount    Float  @default(0)
+  total       Float
+
+  invoice   SaleInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  accessory Accessory   @relation(fields: [accessoryId], references: [id])
+
+  @@map("accessory_sale_items")
+}
+
+// ============================================================
+// إدارة الزيوت (تجزئة وجملة)
+// ============================================================
+
+model OilProduct {
+  id               String    @id @default(cuid())
+  productId        String    @unique
+
+  // نوع البيع وأسعاره (الحقول الأساسية للـ UI)
+  sellingType      String    @default("retail")  // retail | wholesale | both
+  retailPrice      Float     @default(0)          // سعر التجزئة للعلبة
+  wholesalePrice   Float     @default(0)          // سعر الجملة للعلبة
+
+  // معلومات الكرتونة والعلبة
+  cartonUnitsCount Int       @default(12)  // عدد العلب في الكرتون
+  canCapacityLiters Float    @default(1)   // سعة العلبة بالتر
+
+  // حقول إضافية اختيارية
+  brand            String?   // العلامة التجارية
+  oilType          String?   // نوع الزيت
+  size             String?   // الحجم
+  batchNumber      String?
+  expirationDate   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  product        Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stockMovements OilStockMovement[]
+  openContainers OpenContainer[]
+
+  @@map("oil_products")
+}
+
+// تتبع العلب المفتوحة (لبيع الزيت بالتر)
+model OpenContainer {
+  id                 String   @id @default(cuid())
+  oilProductId       String
+  remainingLiters    Float    // الكمية المتبقية بالتر
+  canCapacityLiters  Float    // سعة العلبة بالكامل
+  openedAt           DateTime @default(now())
+  isClosed           Boolean  @default(false)
+
+  oilProduct OilProduct @relation(fields: [oilProductId], references: [id], onDelete: Cascade)
+
+  @@map("open_containers")
+}
+
+model OilStockMovement {
+  id           String   @id @default(cuid())
+  oilProductId String
+  type         String   // شراء | بيع | مرتجع | تسوية
+  unit         String   // carton | can | liter
+  quantity     Float
+  date         DateTime @default(now())
+  reference    String?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  oilProduct OilProduct @relation(fields: [oilProductId], references: [id], onDelete: Cascade)
+
+  @@map("oil_stock_movements")
+}
+
+// ============================================================
+// غسيل السيارات والدراجات
+// ============================================================
+
+model WashOrder {
+  id            String    @id @default(cuid())
+  orderNumber   String    @unique
+  customerId    String?
+  customerName  String
+  customerPhone String?
+  vehicleType   String    @default("car") // car | bike
+  vehiclePlate  String?
+  serviceType   String    // bag_polish | interior_exterior | chemical_wash | exterior_only | vip | bike_wash
+  receivedDate  DateTime  @default(now())
+  deliveryDate  DateTime?
+  price         Float     @default(0)
+  paid          Float     @default(0)
+  status        String    @default("received") // received | washing | ready | delivered | cancelled
+  notes         String?
+  createdById   String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  customer         Customer?         @relation(fields: [customerId], references: [id])
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  cashTransactions CashTransaction[]
+
+  @@map("wash_orders")
+}
+
+// ============================================================
+// فواتير الشراء
+// ============================================================
+
+model PurchaseInvoice {
+  id            String   @id @default(cuid())
+  invoiceNumber String   @unique
+  supplierId    String
+  date          DateTime @default(now())
+  subtotal      Float    @default(0)
+  discount      Float    @default(0)
+  tax           Float    @default(0)
+  total         Float    @default(0)
+  paid          Float    @default(0)
+  notes         String?
+  status        String   @default("draft") // draft | confirmed | paid | partial | cancelled
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  supplier         Supplier          @relation(fields: [supplierId], references: [id])
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  items            PurchaseItem[]
+  cashTransactions CashTransaction[]
+
+  @@map("purchase_invoices")
+}
+
+model PurchaseItem {
+  id        String @id @default(cuid())
+  invoiceId String
+  productId String
+  quantity  Float
+  unitPrice Float
+  discount  Float  @default(0)
+  tax       Float  @default(0)
+  total     Float
+
+  invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id])
+
+  @@map("purchase_items")
+}
+
+// ============================================================
+// فواتير البيع
+// ============================================================
+
+model SaleInvoice {
+  id                String   @id @default(cuid())
+  invoiceNumber     String   @unique
+  customerId        String?
+  date              DateTime @default(now())
+  subtotal          Float    @default(0)
+  discount          Float    @default(0)
+  tax               Float    @default(0)
+  total             Float    @default(0)
+  paid              Float    @default(0)
+  notes             String?
+  status            String   @default("draft") // draft | confirmed | paid | partial | cancelled
+  isReturn          Boolean  @default(false)
+  originalInvoiceId String?
+  createdById       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customer             Customer?          @relation(fields: [customerId], references: [id])
+  createdBy            User               @relation(fields: [createdById], references: [id])
+  items                SaleItem[]
+  accessoryItems       AccessorySaleItem[]
+  originalInvoice      SaleInvoice?       @relation("ReturnInvoice", fields: [originalInvoiceId], references: [id])
+  returnInvoices       SaleInvoice[]      @relation("ReturnInvoice")
+  cashTransactions     CashTransaction[]
+
+  @@map("sale_invoices")
+}
+
+model SaleItem {
+  id        String @id @default(cuid())
+  invoiceId String
+  productId String
+  quantity  Float
+  unitPrice Float
+  discount  Float  @default(0)
+  tax       Float  @default(0)
+  total     Float
+  unit      String @default("piece") // piece | carton | can | liter (for oils)
+
+  invoice SaleInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id])
+
+  @@map("sale_items")
+}
+
+// ============================================================
+// إدارة المخزون
+// ============================================================
+
+model InventoryCount {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  notes       String?
+  status      String   @default("draft") // draft | completed | cancelled
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User                 @relation(fields: [createdById], references: [id])
+  items     InventoryCountItem[]
+
+  @@map("inventory_counts")
+}
+
+model InventoryCountItem {
+  id             String  @id @default(cuid())
+  countId        String
+  productId      String
+  systemQuantity Float
+  actualQuantity Float
+  difference     Float
+  notes          String?
+
+  count   InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  product Product        @relation(fields: [productId], references: [id])
+
+  @@map("inventory_count_items")
+}
+
+model StockAdjustment {
+  id          String   @id @default(cuid())
+  productId   String
+  type        String   // add | remove | damaged | missing
+  quantity    Float
+  reason      String?
+  date        DateTime @default(now())
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  product   Product @relation(fields: [productId], references: [id])
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@map("stock_adjustments")
+}
+
+model InventoryMovement {
+  id          String   @id @default(cuid())
+  productId   String
+  type        String   // in | out | adjustment | return
+  quantity    Float
+  reference   String?
+  referenceId String?
+  date        DateTime @default(now())
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("inventory_movements")
+}
+
+model InventoryTransfer {
+  id             String                  @id @default(cuid())
+  transferNumber String                  @unique
+  fromLocation   String
+  toLocation     String
+  date           DateTime                @default(now())
+  status         String                  @default("completed") // completed | pending
+  notes          String?
+  createdById    String
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  createdBy      User                    @relation(fields: [createdById], references: [id])
+  items          InventoryTransferItem[]
+
+  @@map("inventory_transfers")
+}
+
+model InventoryTransferItem {
+  id         String   @id @default(cuid())
+  transferId String
+  productId  String
+  quantity   Float
+
+  transfer   InventoryTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product    Product           @relation(fields: [productId], references: [id])
+
+  @@map("inventory_transfer_items")
+}
+
+// ============================================================
+// المعاملات النقدية
+// ============================================================
+
+model CashTransaction {
+  id               String   @id @default(cuid())
+  type             String   // income | expense | payment | receipt
+  amount           Float
+  description      String
+  reference        String?
+  referenceId      String?
+  customerId       String?
+  supplierId       String?
+  purchaseInvoiceId String?
+  saleInvoiceId    String?
+  washOrderId      String?
+  date             DateTime @default(now())
+  createdById      String
+  createdAt        DateTime @default(now())
+
+  createdBy       User             @relation(fields: [createdById], references: [id])
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  supplier        Supplier?        @relation(fields: [supplierId], references: [id])
+  purchaseInvoice PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  saleInvoice     SaleInvoice?     @relation(fields: [saleInvoiceId], references: [id])
+  washOrder       WashOrder?       @relation(fields: [washOrderId], references: [id])
+
+  @@map("cash_transactions")
+}
+
+// ============================================================
+// الشركاء وتوزيع الأرباح (للمدير فقط)
+// ============================================================
+
+model Partner {
+  id               String   @id @default(cuid())
+  name             String
+  capitalAmount    Float    @default(0)
+  profitPercentage Float    @default(0)
+  notes            String?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  withdrawals       PartnerWithdrawal[]
+  distributionItems ProfitDistributionItem[]
+
+  @@map("partners")
+}
+
+model PartnerWithdrawal {
+  id        String   @id @default(cuid())
+  partnerId String
+  amount    Float
+  date      DateTime @default(now())
+  notes     String?
+  createdAt DateTime @default(now())
+
+  partner Partner @relation(fields: [partnerId], references: [id])
+
+  @@map("partner_withdrawals")
+}
+
+model BusinessExpense {
+  id          String   @id @default(cuid())
+  amount      Float
+  description String
+  category    String   // rent | salary | utilities | maintenance | other
+  date        DateTime @default(now())
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@map("business_expenses")
+}
+
+model ProfitDistribution {
+  id            String   @id @default(cuid())
+  period        String   // monthly | yearly | custom
+  startDate     DateTime
+  endDate       DateTime
+  totalRevenue  Float
+  totalExpenses Float
+  netProfit     Float
+  distributedAt DateTime @default(now())
+  notes         String?
+
+  items ProfitDistributionItem[]
+
+  @@map("profit_distributions")
+}
+
+model ProfitDistributionItem {
+  id             String @id @default(cuid())
+  distributionId String
+  partnerId      String
+  amount         Float
+  percentage     Float
+
+  distribution ProfitDistribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+  partner      Partner             @relation(fields: [partnerId], references: [id])
+
+  @@map("profit_distribution_items")
+}

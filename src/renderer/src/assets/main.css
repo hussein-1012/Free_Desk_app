@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full w-full m-0 p-0 overflow-hidden select-none antialiased;
+    direction: rtl;
+    font-family: 'Cairo', 'Segoe UI', sans-serif;
+  }
+
+  /* الوضع الفاتح (الافتراضي) */
+  html {
+    @apply bg-gray-50 text-gray-900;
+  }
+
+  /* الوضع الداكن */
+  html.dark {
+    @apply bg-gray-900 text-gray-100;
+  }
+
+  /* شريط التمرير المخصص */
+  ::-webkit-scrollbar {
+    @apply w-1.5 h-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400 dark:bg-gray-500;
+  }
+}
+
+@layer components {
+  /* بطاقة أساسية */
+  .card {
+    @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm;
+  }
+
+  /* بطاقة قابلة للنقر */
+  .card-hover {
+    @apply card hover:shadow-md hover:border-accent-300 dark:hover:border-accent-500 transition-all duration-200 cursor-pointer;
+  }
+
+  /* زر أساسي */
+  .btn-primary {
+    @apply bg-accent-600 hover:bg-accent-500 active:bg-accent-700 text-white font-semibold rounded-xl px-5 py-2.5 transition-all duration-150 shadow-sm hover:shadow disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2 text-sm;
+  }
+
+  /* زر ثانوي */
+  .btn-secondary {
+    @apply bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-xl px-5 py-2.5 transition-all duration-150 flex items-center gap-2 text-sm;
+  }
+
+  /* زر خطر */
+  .btn-danger {
+    @apply bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 font-medium rounded-xl px-4 py-2 transition-all duration-150 flex items-center gap-2 text-sm;
+  }
+
+  /* حقل إدخال */
+  .input-field {
+    @apply w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-2.5 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 transition-all text-sm;
+  }
+
+  /* تسمية الحقل */
+  .form-label {
+    @apply block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5;
+  }
+
+  /* شارة الحالة */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold;
+  }
+  .badge-success {
+    @apply badge bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400;
+  }
+  .badge-warning {
+    @apply badge bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400;
+  }
+  .badge-danger  {
+    @apply badge bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400;
+  }
+  .badge-info    {
+    @apply badge bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400;
+  }
+  .badge-neutral {
+    @apply badge bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400;
+  }
+
+  /* بطاقة قسم الشاشة الرئيسية */
+  .tile-btn {
+    @apply card-hover flex flex-col items-center justify-center gap-3 p-6 min-h-[140px] text-center select-none;
+  }
+  .tile-icon {
+    @apply w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-sm;
+  }
+  .tile-label {
+    @apply text-sm font-bold text-gray-800 dark:text-gray-100 leading-tight;
+  }
+}
+
+@layer utilities {
+  /* تأثيرات الحركة */
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+  .animate-slide-up {
+    animation: slideUp 0.25s ease-out;
+  }
+  .animate-scale-in {
+    animation: scaleIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { transform: translateY(12px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+  @keyframes scaleIn {
+    from { transform: scale(0.95); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+}
